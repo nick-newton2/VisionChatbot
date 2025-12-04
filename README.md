@@ -20,7 +20,7 @@ ollama pull llava
 
 ### After installing python3 use pip to install python packages
 ```bash
-python3 -m pip install psutil requests pillow customtkinter
+python3 -m pip install psutil requests pillow customtkinter tkinterdnd2 nvidia-ml-py3
 
 # Standard tkinter should be installed with windows python3 install can test with
 python3 -m tkinter
@@ -47,7 +47,7 @@ taskkill /PID 1234 /F  # -> where 1234 is pid number
 ## Running the Application
 Launch the interactive GUI
 ```bash
-python3 vision_chatbot_themed.py
+python3 desktop_vision_chatbot_vf.py
 ```
 
 From here you can select the chat model and choose between themes
