@@ -1,8 +1,7 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from PIL import Image
-import base64, requests, subprocess, time, psutil, threading, json
-import os
+import base64, requests, subprocess, time, psutil, threading, json, os
 
 # Try to import NVML, if available
 try:
@@ -16,26 +15,37 @@ APP_TITLE = "Local Vision AI"
 OLLAMA_URL = "http://localhost:11434"
 GENERATE_URL = OLLAMA_URL + "/api/generate"
 
+MAX_LOG_LINES = 200  # Keep last 200 Ollama log lines
+
 # ---------------- GUI ----------------
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1000x800")
+        self.geometry("1200x800")
 
         self.img_path = None
         self.chat_log = []
+        self.gpu_log_lines = []
+        self.current_gpu_log = {}
 
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
 
+        # Sidebar visibility
+        self.gpu_sidebar_visible = True
+
         self.build_ui()
+        self.build_gpu_sidebar()
         if GPU_AVAILABLE:
             self.update_gpu()
         self.ensure_ollama()
 
+        threading.Thread(target=self.capture_ollama_logs, daemon=True).start()
+
     # ---------------- UI ----------------
     def build_ui(self):
+        # Top bar
         self.top = ctk.CTkFrame(self, height=50)
         self.top.pack(fill="x", padx=10, pady=10)
 
@@ -53,11 +63,10 @@ class App(ctk.CTk):
         self.status_label = ctk.CTkLabel(self.top, text="Starting Ollama...", text_color="yellow")
         self.status_label.pack(side="right", padx=10)
 
-        if GPU_AVAILABLE:
-            self.gpu_label = ctk.CTkLabel(self.top, text="GPU: --", text_color="orange")
-            self.gpu_label.pack(side="right", padx=10)
+        self.gpu_label = ctk.CTkLabel(self.top, text="GPU: N/A", text_color="orange")
+        self.gpu_label.pack(side="right", padx=10)
 
-        # Chat area
+        # Main chat area
         self.chat_area = ctk.CTkScrollableFrame(self, corner_radius=15)
         self.chat_area.pack(fill="both", expand=True, padx=15, pady=10)
 
@@ -75,6 +84,64 @@ class App(ctk.CTk):
         ctk.CTkButton(bar, text="Clear Chat", command=self.clear_chat).pack(side="left", padx=6)
         ctk.CTkButton(bar, text="Export Logs", command=self.export_logs).pack(side="left", padx=6)
         ctk.CTkButton(bar, text="Quit", fg_color="red", command=self.quit_app).pack(side="left", padx=6)
+
+    # ---------------- GPU & Ollama Sidebar ----------------
+    # ---------------- GPU & Ollama Sidebar ----------------
+    def build_gpu_sidebar(self):
+        # Container frame to hold both toggle button and logs
+        self.sidebar_container = ctk.CTkFrame(self, width=250, corner_radius=0)
+        self.sidebar_container.pack(side="left", fill="y")
+
+        # Toggle button stays at top and always visible
+        self.gpu_toggle_btn = ctk.CTkButton(
+            self.sidebar_container, text="Collapse Logs", command=self.toggle_gpu_sidebar
+        )
+        self.gpu_toggle_btn.pack(pady=10, padx=10)
+
+        # Scrollable Ollama logs
+        self.sidebar = ctk.CTkFrame(self.sidebar_container)
+        self.sidebar.pack(fill="y", expand=True)
+
+        self.gpu_text_area = ctk.CTkTextbox(self.sidebar, width=230, height=600)
+        self.gpu_text_area.pack(pady=5, padx=5, fill="y", expand=True)
+        self.gpu_text_area.configure(state="disabled")
+
+        # Scrollbar
+        self.scrollbar = ctk.CTkScrollbar(self.sidebar, command=self.gpu_text_area.yview)
+        self.scrollbar.pack(side="right", fill="y")
+        self.gpu_text_area.configure(yscrollcommand=self.scrollbar.set)
+
+    def toggle_gpu_sidebar(self):
+        if self.sidebar.winfo_ismapped():
+            self.sidebar.pack_forget()
+            self.gpu_toggle_btn.configure(text="Expand Logs")
+        else:
+            self.sidebar.pack(fill="y", expand=True)
+            self.gpu_toggle_btn.configure(text="Collapse Logs")
+
+    def append_gpu_log(self, line):
+        self.gpu_log_lines.append(line)
+        if len(self.gpu_log_lines) > MAX_LOG_LINES:
+            self.gpu_log_lines = self.gpu_log_lines[-MAX_LOG_LINES:]
+
+        self.gpu_text_area.configure(state="normal")
+        self.gpu_text_area.delete("1.0", "end")
+        self.gpu_text_area.insert("end", "\n".join(self.gpu_log_lines))
+        self.gpu_text_area.yview("end")
+        self.gpu_text_area.configure(state="disabled")
+
+    def capture_ollama_logs(self):
+        try:
+            proc = subprocess.Popen(
+                ["ollama", "serve"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            for line in proc.stdout:
+                line = line.strip()
+                if line:
+                    self.append_gpu_log(line)
+            proc.wait()
+        except Exception as e:
+            self.append_gpu_log(f"[OLLAMA LOG ERROR] {e}")
 
     # ---------------- CHAT BUBBLES ----------------
     def bubble(self, text, sender="ai"):
@@ -94,7 +161,6 @@ class App(ctk.CTk):
             self.bubble(f"Image Loaded:\n{path}", "user")
             self.show_image_preview(path)
 
-    # ---------------- SHOW IMAGE PREVIEW ----------------
     def show_image_preview(self, path):
         try:
             img = Image.open(path)
@@ -135,7 +201,7 @@ class App(ctk.CTk):
 
             reply = self.call_ollama(model, prompt)
 
-            self.chat_log.append({"user":text,"ai":reply})
+            self.chat_log.append({"user":text,"ai":reply, "gpu_log": self.current_gpu_log.copy()})
             self.after(0, lambda:self.bubble(reply,"ai"))
             self.status_label.configure(text="Ready", text_color="yellow")
 
@@ -180,9 +246,14 @@ class App(ctk.CTk):
         try:
             h = nvmlDeviceGetHandleByIndex(0)
             util = nvmlDeviceGetUtilizationRates(h)
-            self.gpu_label.configure(text=f"GPU: {util.gpu}%")
+            mem = nvmlDeviceGetMemoryInfo(h)
+            temp = nvmlDeviceGetTemperature(h, NVML_TEMPERATURE_GPU)
+            gpu_text = f"GPU: {util.gpu}%\nMemory: {mem.used/1024**2:.1f}/{mem.total/1024**2:.1f} MB\nTemp: {temp}°C"
+            self.gpu_label.configure(text=gpu_text)
+            self.current_gpu_log = {"gpu":util.gpu, "memory_used":mem.used, "memory_total":mem.total, "temp":temp}
         except:
             self.gpu_label.configure(text="GPU: N/A")
+            self.current_gpu_log = {}
         self.after(1000, self.update_gpu)
 
     # ---------------- CLEAR CHAT ----------------
@@ -195,15 +266,15 @@ class App(ctk.CTk):
     def export_logs(self):
         path = filedialog.asksaveasfilename(defaultextension=".json")
         if path:
+            export_data = {"chat": self.chat_log, "ollama_logs": self.gpu_log_lines}
             with open(path,"w") as f:
-                json.dump(self.chat_log, f, indent=2)
+                json.dump(export_data, f, indent=2)
             messagebox.showinfo("Saved","Logs exported")
 
     # ---------------- EXIT ----------------
     def quit_app(self):
         self.kill_ollama()
         self.destroy()
-
 
 # ---------------- START ----------------
 if __name__ == "__main__":
