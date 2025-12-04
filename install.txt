@@ -1,0 +1,26 @@
+install.txt
+
+install ollama from website for windows
+
+in cmd prompt:
+ollama pull ministral-3:8b
+ollama pull deepseek-r1:8b
+ollama pull llava
+
+can do ollama run [model] but this is started/stopped in code
+to kill ollama models
+
+check open
+ollama ps
+
+add how to kill here:
+tasklist | findstr ollama
+taskkill /PID 1234 /F   -> where 1234 is pid number
+
+
+python3 -m pip install psutil requests pillow customtkinter
+
+tkinter should be installed with windows python3 install can test with python3 -m tkinter
+
+python3 vision_chatbot_vf.py
+
