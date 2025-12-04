@@ -29,7 +29,7 @@ python3 -m tkinter
 ## Running Ollama Notes
 To run a model (for this code it is handled by the script):
 ```bash
-ollama run [model] but this is started/stopped in code
+ollama run [model] # This is started/stopped in code
 ```
 
 To kill ollama models:
@@ -55,4 +55,15 @@ From here you can select the chat model and choose between themes
 You are able to upload an image from your computer then fill in the box and click ask to prompt the models.
 
 To exit and quit the models press the quit button.
+
+## Summary
+| Component       | Tool                |
+| --------------- | ------------------- |
+| GPU inference   | RTX 4060            |
+| Model host      | Ollama              |
+| Vision model    | LLaVA               |
+| Reasoning model | Ministral/Deepseek  |
+| Desktop UI      | Customtkinter       |
+| Privacy         | 100% local          |
+
 
