@@ -15,8 +15,6 @@ APP_TITLE = "Local Vision AI"
 OLLAMA_URL = "http://localhost:11434"
 GENERATE_URL = OLLAMA_URL + "/api/generate"
 
-MAX_LOG_LINES = 200  # Keep last 200 Ollama log lines
-
 # ---------------- GUI ----------------
 class App(ctk.CTk):
     def __init__(self):
@@ -26,22 +24,19 @@ class App(ctk.CTk):
 
         self.img_path = None
         self.chat_log = []
-        self.gpu_log_lines = []
-        self.current_gpu_log = {}
 
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
 
         # Sidebar visibility
-        self.gpu_sidebar_visible = True
+        self.log_collapsed = False
+        self.current_gpu_log = {}
 
         self.build_ui()
         self.build_gpu_sidebar()
         if GPU_AVAILABLE:
             self.update_gpu()
-        self.ensure_ollama()
-
-        threading.Thread(target=self.capture_ollama_logs, daemon=True).start()
+        self.ollama_running = False
 
     # ---------------- UI ----------------
     def build_ui(self):
@@ -60,15 +55,15 @@ class App(ctk.CTk):
             variable=self.mode,
             command=self.toggle_mode).pack(side="left", padx=10)
 
-        self.status_label = ctk.CTkLabel(self.top, text="Starting Ollama...", text_color="yellow")
+        self.status_label = ctk.CTkLabel(self.top, text="Ready", text_color="yellow")
         self.status_label.pack(side="right", padx=10)
 
-        self.gpu_label = ctk.CTkLabel(self.top, text="GPU: N/A", text_color="orange")
-        self.gpu_label.pack(side="right", padx=10)
+        # Main chat area (adjustable height)
+        self.chat_area_frame = ctk.CTkFrame(self)
+        self.chat_area_frame.pack(fill="both", expand=True, padx=15, pady=10)
 
-        # Main chat area
-        self.chat_area = ctk.CTkScrollableFrame(self, corner_radius=15)
-        self.chat_area.pack(fill="both", expand=True, padx=15, pady=10)
+        self.chat_area = ctk.CTkScrollableFrame(self.chat_area_frame, corner_radius=15)
+        self.chat_area.pack(fill="both", expand=True)
 
         # Entry box
         self.entry = ctk.CTkEntry(self, placeholder_text="Ask about the image...")
@@ -85,63 +80,40 @@ class App(ctk.CTk):
         ctk.CTkButton(bar, text="Export Logs", command=self.export_logs).pack(side="left", padx=6)
         ctk.CTkButton(bar, text="Quit", fg_color="red", command=self.quit_app).pack(side="left", padx=6)
 
-    # ---------------- GPU & Ollama Sidebar ----------------
-    # ---------------- GPU & Ollama Sidebar ----------------
+    # ---------------- GPU SIDEBAR ----------------
     def build_gpu_sidebar(self):
-        # Container frame to hold both toggle button and logs
-        self.sidebar_container = ctk.CTkFrame(self, width=250, corner_radius=0)
-        self.sidebar_container.pack(side="left", fill="y")
+        self.sidebar = ctk.CTkFrame(self, width=300, corner_radius=0)
+        self.sidebar.pack(side="left", fill="y")
 
-        # Toggle button stays at top and always visible
-        self.gpu_toggle_btn = ctk.CTkButton(
-            self.sidebar_container, text="Collapse Logs", command=self.toggle_gpu_sidebar
-        )
-        self.gpu_toggle_btn.pack(pady=10, padx=10)
+        # GPU stats at top left
+        self.gpu_label = ctk.CTkLabel(self.sidebar, text="GPU Stats Loading...", text_color="orange", anchor="w", justify="left")
+        self.gpu_label.pack(fill="x", padx=10, pady=10)
 
-        # Scrollable Ollama logs
-        self.sidebar = ctk.CTkFrame(self.sidebar_container)
-        self.sidebar.pack(fill="y", expand=True)
+        # Collapsible log section
+        self.log_frame = ctk.CTkFrame(self.sidebar)
+        self.log_frame.pack(fill="both", expand=True, padx=10, pady=(0,10))
 
-        self.gpu_text_area = ctk.CTkTextbox(self.sidebar, width=230, height=600)
-        self.gpu_text_area.pack(pady=5, padx=5, fill="y", expand=True)
-        self.gpu_text_area.configure(state="disabled")
+        self.log_text = ctk.CTkTextbox(self.log_frame, width=280, height=300)
+        self.log_text.pack(fill="both", expand=True)
 
-        # Scrollbar
-        self.scrollbar = ctk.CTkScrollbar(self.sidebar, command=self.gpu_text_area.yview)
-        self.scrollbar.pack(side="right", fill="y")
-        self.gpu_text_area.configure(yscrollcommand=self.scrollbar.set)
+        self.gpu_toggle_btn = ctk.CTkButton(self.sidebar, text="Collapse Logs", command=self.toggle_log)
+        self.gpu_toggle_btn.pack(pady=5, padx=10)
 
-    def toggle_gpu_sidebar(self):
-        if self.sidebar.winfo_ismapped():
-            self.sidebar.pack_forget()
-            self.gpu_toggle_btn.configure(text="Expand Logs")
-        else:
-            self.sidebar.pack(fill="y", expand=True)
+    def toggle_log(self):
+        if self.log_collapsed:
+            self.log_text.pack(fill="both", expand=True)
             self.gpu_toggle_btn.configure(text="Collapse Logs")
+            self.log_collapsed = False
+        else:
+            self.log_text.pack_forget()
+            self.gpu_toggle_btn.configure(text="Expand Logs")
+            self.log_collapsed = True
 
-    def append_gpu_log(self, line):
-        self.gpu_log_lines.append(line)
-        if len(self.gpu_log_lines) > MAX_LOG_LINES:
-            self.gpu_log_lines = self.gpu_log_lines[-MAX_LOG_LINES:]
-
-        self.gpu_text_area.configure(state="normal")
-        self.gpu_text_area.delete("1.0", "end")
-        self.gpu_text_area.insert("end", "\n".join(self.gpu_log_lines))
-        self.gpu_text_area.yview("end")
-        self.gpu_text_area.configure(state="disabled")
-
-    def capture_ollama_logs(self):
-        try:
-            proc = subprocess.Popen(
-                ["ollama", "serve"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-            )
-            for line in proc.stdout:
-                line = line.strip()
-                if line:
-                    self.append_gpu_log(line)
-            proc.wait()
-        except Exception as e:
-            self.append_gpu_log(f"[OLLAMA LOG ERROR] {e}")
+    def append_log(self, text):
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", text + "\n")
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
 
     # ---------------- CHAT BUBBLES ----------------
     def bubble(self, text, sender="ai"):
@@ -167,7 +139,7 @@ class App(ctk.CTk):
             img.thumbnail((200, 200))
             photo = ctk.CTkImage(img, size=img.size)
             label = ctk.CTkLabel(self.chat_area, image=photo, text="")
-            label.image = photo  # keep reference
+            label.image = photo
             label.pack(anchor="e", padx=10, pady=6)
         except Exception as e:
             self.bubble(f"Preview Error: {e}", "ai")
@@ -186,20 +158,28 @@ class App(ctk.CTk):
         self.bubble(msg, "user")
         self.status_label.configure(text="Thinking...", text_color="orange")
 
+        if not self.ollama_running:
+            threading.Thread(target=self.ensure_ollama, daemon=True).start()
+
         threading.Thread(target=self.ask_ai, args=(msg,), daemon=True).start()
 
     # ---------------- AI ----------------
     def ask_ai(self, text):
         try:
+            # Stream logs from Ollama while generating
+            self.ollama_running = True
+            self.append_log("Starting Ollama generation...")
+
             vision = self.call_ollama("llava",
                 "Describe objects, text, risks, layout and anomalies.",
                 [self.encode_image(self.img_path)]
             )
+            self.append_log("Vision processing complete.")
 
             model = self.model_var.get()
             prompt = f"Image:\n{vision}\n\nUser:\n{text}"
-
             reply = self.call_ollama(model, prompt)
+            self.append_log("AI response received.")
 
             self.chat_log.append({"user":text,"ai":reply, "gpu_log": self.current_gpu_log.copy()})
             self.after(0, lambda:self.bubble(reply,"ai"))
@@ -208,6 +188,7 @@ class App(ctk.CTk):
         except Exception as e:
             self.status_label.configure(text="Error", text_color="red")
             self.after(0, lambda:self.bubble(f"Error: {e}","ai"))
+            self.append_log(f"Error: {e}")
 
     # ---------------- OLLAMA ----------------
     def call_ollama(self, model, prompt, images=None):
@@ -220,11 +201,12 @@ class App(ctk.CTk):
     def ensure_ollama(self):
         try:
             requests.get(OLLAMA_URL, timeout=1)
-            self.status_label.configure(text="Ollama Ready", text_color="yellow")
+            self.append_log("Ollama already running.")
         except:
+            self.append_log("Starting Ollama server...")
             subprocess.Popen(["ollama","serve"], shell=True)
             time.sleep(5)
-            self.status_label.configure(text="Ollama Started", text_color="yellow")
+            self.append_log("Ollama started.")
 
     def kill_ollama(self):
         for proc in psutil.process_iter(["name"]):
@@ -266,7 +248,7 @@ class App(ctk.CTk):
     def export_logs(self):
         path = filedialog.asksaveasfilename(defaultextension=".json")
         if path:
-            export_data = {"chat": self.chat_log, "ollama_logs": self.gpu_log_lines}
+            export_data = {"chat": self.chat_log}
             with open(path,"w") as f:
                 json.dump(export_data, f, indent=2)
             messagebox.showinfo("Saved","Logs exported")
@@ -275,6 +257,7 @@ class App(ctk.CTk):
     def quit_app(self):
         self.kill_ollama()
         self.destroy()
+
 
 # ---------------- START ----------------
 if __name__ == "__main__":
