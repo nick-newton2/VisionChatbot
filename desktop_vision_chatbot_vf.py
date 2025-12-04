@@ -50,7 +50,7 @@ class App(ctk.CTk):
             variable=self.mode,
             command=self.toggle_mode).pack(side="left", padx=10)
 
-        self.status_label = ctk.CTkLabel(self.top, text="Starting Ollama...", text_color="cyan")
+        self.status_label = ctk.CTkLabel(self.top, text="Starting Ollama...", text_color="yellow")
         self.status_label.pack(side="right", padx=10)
 
         if GPU_AVAILABLE:
@@ -61,16 +61,18 @@ class App(ctk.CTk):
         self.chat_area = ctk.CTkScrollableFrame(self, corner_radius=15)
         self.chat_area.pack(fill="both", expand=True, padx=15, pady=10)
 
+        # Entry box
         self.entry = ctk.CTkEntry(self, placeholder_text="Ask about the image...")
         self.entry.pack(fill="x", padx=15, pady=10)
         self.entry.bind("<Return>", lambda e:self.send())
 
+        # Bottom buttons
         bar = ctk.CTkFrame(self)
         bar.pack(pady=10)
 
         ctk.CTkButton(bar, text="Upload Image", command=self.upload_image).pack(side="left", padx=6)
         ctk.CTkButton(bar, text="Ask", command=self.send).pack(side="left", padx=6)
-        ctk.CTkButton(bar, text="Settings", command=self.settings_panel).pack(side="left", padx=6)
+        ctk.CTkButton(bar, text="Clear Chat", command=self.clear_chat).pack(side="left", padx=6)
         ctk.CTkButton(bar, text="Export Logs", command=self.export_logs).pack(side="left", padx=6)
         ctk.CTkButton(bar, text="Quit", fg_color="red", command=self.quit_app).pack(side="left", padx=6)
 
@@ -90,6 +92,19 @@ class App(ctk.CTk):
         if path:
             self.img_path = path
             self.bubble(f"Image Loaded:\n{path}", "user")
+            self.show_image_preview(path)
+
+    # ---------------- SHOW IMAGE PREVIEW ----------------
+    def show_image_preview(self, path):
+        try:
+            img = Image.open(path)
+            img.thumbnail((200, 200))
+            photo = ctk.CTkImage(img, size=img.size)
+            label = ctk.CTkLabel(self.chat_area, image=photo, text="")
+            label.image = photo  # keep reference
+            label.pack(anchor="e", padx=10, pady=6)
+        except Exception as e:
+            self.bubble(f"Preview Error: {e}", "ai")
 
     # ---------------- SEND ----------------
     def send(self):
@@ -103,7 +118,7 @@ class App(ctk.CTk):
 
         self.entry.delete(0,"end")
         self.bubble(msg, "user")
-        self.status_label.configure(text="Thinking...")
+        self.status_label.configure(text="Thinking...", text_color="orange")
 
         threading.Thread(target=self.ask_ai, args=(msg,), daemon=True).start()
 
@@ -122,10 +137,10 @@ class App(ctk.CTk):
 
             self.chat_log.append({"user":text,"ai":reply})
             self.after(0, lambda:self.bubble(reply,"ai"))
-            self.status_label.configure(text="Ready")
+            self.status_label.configure(text="Ready", text_color="yellow")
 
         except Exception as e:
-            self.status_label.configure(text="Error")
+            self.status_label.configure(text="Error", text_color="red")
             self.after(0, lambda:self.bubble(f"Error: {e}","ai"))
 
     # ---------------- OLLAMA ----------------
@@ -139,11 +154,11 @@ class App(ctk.CTk):
     def ensure_ollama(self):
         try:
             requests.get(OLLAMA_URL, timeout=1)
-            self.status_label.configure(text="Ollama Ready")
+            self.status_label.configure(text="Ollama Ready", text_color="yellow")
         except:
             subprocess.Popen(["ollama","serve"], shell=True)
             time.sleep(5)
-            self.status_label.configure(text="Ollama Started")
+            self.status_label.configure(text="Ollama Started", text_color="yellow")
 
     def kill_ollama(self):
         for proc in psutil.process_iter(["name"]):
@@ -170,26 +185,7 @@ class App(ctk.CTk):
             self.gpu_label.configure(text="GPU: N/A")
         self.after(1000, self.update_gpu)
 
-    # ---------------- SETTINGS ----------------
-    def settings_panel(self):
-        s = ctk.CTkToplevel(self)
-        s.title("Settings")
-        s.geometry("320x250")
-
-        ctk.CTkLabel(s, text="Settings", font=("Arial",16)).pack(pady=10)
-
-        ctk.CTkLabel(s, text="Model").pack()
-        ctk.CTkOptionMenu(s, values=["deepseek-r1:8b","ministral-3:8b"],
-                          variable=self.model_var).pack(pady=5)
-
-        ctk.CTkLabel(s, text="Theme").pack()
-        ctk.CTkOptionMenu(s, values=["Dark","Light"],
-                          variable=self.mode,
-                          command=self.toggle_mode).pack(pady=5)
-
-        ctk.CTkButton(s, text="Clear Chat", command=self.clear_chat).pack(pady=8)
-        ctk.CTkButton(s, text="Kill Ollama", fg_color="red", command=self.kill_ollama).pack()
-
+    # ---------------- CLEAR CHAT ----------------
     def clear_chat(self):
         for w in self.chat_area.winfo_children():
             w.destroy()

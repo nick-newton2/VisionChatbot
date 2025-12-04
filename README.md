@@ -20,7 +20,7 @@ ollama pull llava
 
 ### After installing python3 use pip to install python packages
 ```bash
-python3 -m pip install psutil requests pillow customtkinter tkinterdnd2 nvidia-ml-py3
+python3 -m pip install psutil requests pillow customtkinter pynvml
 
 # Standard tkinter should be installed with windows python3 install can test with
 python3 -m tkinter
